@@ -3,10 +3,10 @@
 -- ============================================================================
 -- Purpose: Schema for trade, position, and cash reconciliation system
 -- Database: PostgreSQL 14+
--- Author: Jessica
+-- Author: [Your Name]
 -- ============================================================================
 
--- Dropping existing tables if re-running
+-- Drop existing tables if re-running (careful in production!)
 DROP TABLE IF EXISTS recon_trades CASCADE;
 DROP TABLE IF EXISTS recon_positions CASCADE;
 DROP TABLE IF EXISTS recon_cash CASCADE;
@@ -37,7 +37,7 @@ CREATE TABLE internal_trades (
     price NUMERIC(12, 4) NOT NULL CHECK (price > 0),
     fees NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
     currency VARCHAR(3) NOT NULL DEFAULT 'USD',
-    net_amount NUMERIC(15, 2) NOT NULL,  -- Signed cash flow (negative for buys)
+    principal NUMERIC(15, 2) NOT NULL,  -- Signed cash flow (negative for buys)
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -55,7 +55,7 @@ CREATE TABLE broker_trades (
     price NUMERIC(12, 4) NOT NULL CHECK (price > 0),
     fees NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
     currency VARCHAR(3) NOT NULL DEFAULT 'USD',
-    net_amount NUMERIC(15, 2) NOT NULL,
+    principal NUMERIC(15, 2) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

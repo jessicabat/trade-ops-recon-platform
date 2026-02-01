@@ -58,7 +58,7 @@ def generate_internal_trades(n=1000):
     df = pd.DataFrame(data)
     
     # Net Amount Calculation
-    df['net_amount'] = df.apply(lambda x: 
+    df['principal'] = df.apply(lambda x: 
                                 -1 * ((x['quantity'] * x['price']) + x['fees']) if x['side'] == 'BUY' 
                                 else ((x['quantity'] * x['price']) - x['fees']), axis=1)
     return df
@@ -102,21 +102,28 @@ def corrupt_broker_data(internal_df):
     broker_df = pd.concat([broker_df, phantom_df])
     
     # Recalculate Net Amount
-    broker_df['net_amount'] = broker_df.apply(lambda x: 
+    broker_df['principal'] = broker_df.apply(lambda x: 
                                 -1 * ((x['quantity'] * x['price']) + x['fees']) if x['side'] == 'BUY' 
                                 else ((x['quantity'] * x['price']) - x['fees']), axis=1)
     return broker_df
 
 def aggregate_positions(df):
-    df['signed_qty'] = df.apply(lambda x: x['quantity'] if x['side'] == 'BUY' else -x['quantity'], axis=1)
-    pos_df = df.groupby(['account', 'symbol'])['signed_qty'].sum().reset_index()
+    # Work on a copy to avoid modifying the original trades dataframe
+    df_copy = df.copy()
+    df_copy['signed_qty'] = df_copy.apply(lambda x: x['quantity'] if x['side'] == 'BUY' else -x['quantity'], axis=1)
+    pos_df = df_copy.groupby(['account', 'symbol'])['signed_qty'].sum().reset_index()
     pos_df.rename(columns={'signed_qty': 'net_position'}, inplace=True)
+    pos_df['position_date'] = datetime.now().date()
     return pos_df
 
+
+
 def aggregate_cash(df):
-    cash_df = df.groupby(['account', 'currency'])['net_amount'].sum().reset_index()
-    cash_df.rename(columns={'net_amount': 'net_cash_balance'}, inplace=True)
+    cash_df = df.groupby(['account', 'currency'])['principal'].sum().reset_index()
+    cash_df.rename(columns={'principal': 'net_cash_balance'}, inplace=True)
+    cash_df['cash_date'] = datetime.now().date()
     return cash_df
+
 
 def main():
     setup_directories()

@@ -6,9 +6,11 @@ import sys
 from datetime import datetime
 import csv
 from io import StringIO
+print("DEBUG: Script started")
 
 # --- CONFIGURATION ---
 DB_CONNECTION_STR = 'postgresql://jessica@localhost:5432/trade_ops_recon'
+print(f"DEBUG: Connection string = {DB_CONNECTION_STR}")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, 'data', 'raw')
@@ -30,6 +32,7 @@ def get_file_path(date_str, key):
 def fast_load_csv(file_path, table_name, engine):
     """
     Optimized loader using PostgreSQL 'COPY' for high performance.
+    Explicitly specifies columns so DB can use DEFAULTs for created_at.
     """
     if not os.path.exists(file_path):
         print(f"⚠️  File not found: {file_path}. Skipping {table_name}.")
@@ -40,11 +43,6 @@ def fast_load_csv(file_path, table_name, engine):
     try:
         df = pd.read_csv(file_path)
         
-        # Ensure dates are parsed
-        date_cols = [col for col in df.columns if 'date' in col]
-        for col in date_cols:
-            df[col] = pd.to_datetime(df[col])
-
         # Create a raw connection for the COPY command
         conn = engine.raw_connection()
         cursor = conn.cursor()
@@ -54,8 +52,13 @@ def fast_load_csv(file_path, table_name, engine):
         df.to_csv(output, sep='\t', header=False, index=False)
         output.seek(0)
         
-        # The 'COPY' command is the fastest way to load data into Postgres
-        cursor.copy_from(output, table_name, null="")
+        # Tell COPY: "Here are the columns I'm providing; use defaults for the rest"
+        columns_csv = ', '.join(df.columns)  # trade_id, trade_date, ..., principal
+        copy_sql = f"COPY {table_name} ({columns_csv}) FROM STDIN WITH (FORMAT TEXT, DELIMITER E'\\t', NULL '')"
+        
+        # Use copy_expert instead of copy_from to specify columns
+        cursor.copy_expert(copy_sql, output)
+        
         conn.commit()
         cursor.close()
         
@@ -64,6 +67,8 @@ def fast_load_csv(file_path, table_name, engine):
     except Exception as e:
         print(f"❌ Error loading {table_name}: {e}")
         raise e
+
+
 
 def log_pipeline_run(engine, status, start_time, date_str, rows=0, error=None):
     end_time = datetime.now()
