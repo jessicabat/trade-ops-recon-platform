@@ -3,7 +3,7 @@ from sqlalchemy import create_engine, text
 from datetime import datetime
 import os
 import sys
-import pandas as pd
+# import pandas as pd
 
 # --- CONFIGURATION ---
 DB_CONNECTION_STR = 'postgresql://jessica@localhost:5432/trade_ops_recon'
@@ -90,22 +90,22 @@ def print_summary(summary_rows):
     print(f"Total Breaks Found: {total_breaks}")
     return total_breaks
 
-def export_breaks_csv(date_str, engine):
-    """Export detailed breaks to CSV for investigation."""    
-    with engine.connect() as conn:
-        query = text("""
-            SELECT recon_date, trade_id, symbol, account, break_type, severity, 
-                   internal_value, broker_value, notional_impact, resolved
-            FROM recon_trades
-            WHERE recon_date = :date
-            ORDER BY severity, notional_impact DESC
-        """)
-        df = pd.read_sql(query, conn, params={"date": date_str})
+# def export_breaks_csv(date_str, engine):
+#     """Export detailed breaks to CSV for investigation."""    
+#     with engine.connect() as conn:
+#         query = text("""
+#             SELECT recon_date, trade_id, symbol, account, break_type, severity, 
+#                    internal_value, broker_value, notional_impact, resolved
+#             FROM recon_trades
+#             WHERE recon_date = :date
+#             ORDER BY severity, notional_impact DESC
+#         """)
+#         df = pd.read_sql(query, conn, params={"date": date_str})
     
-    output_path = f"data/processed/recon_reports/breaks_{date_str}.csv"
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    df.to_csv(output_path, index=False)
-    print(f"📄 Detailed breaks exported to {output_path}")
+#     output_path = f"data/processed/recon_reports/breaks_{date_str}.csv"
+#     os.makedirs(os.path.dirname(output_path), exist_ok=True)
+#     df.to_csv(output_path, index=False)
+#     print(f"📄 Detailed breaks exported to {output_path}")
 
 
 def log_pipeline_run(engine, status, start_time, date_str, breaks=0, error=None):
@@ -133,43 +133,6 @@ def log_pipeline_run(engine, status, start_time, date_str, breaks=0, error=None)
         conn.execute(sql, params)
         conn.commit()
 
-def main():
-    parser = argparse.ArgumentParser(description="Run Trade Reconciliation for a specific date.")
-    parser.add_argument('--date', type=str, required=False, help="YYYY-MM-DD")
-    args = parser.parse_args()
-    
-    target_date = args.date if args.date else datetime.now().strftime('%Y-%m-%d')
-    start_time = datetime.now()
-    
-    try:
-        engine = create_engine(DB_CONNECTION_STR)
-        
-        # Run the Logic and get summary
-        summary_rows = run_recon(target_date, engine)
-        
-        # Show Results
-        total_breaks = print_summary(summary_rows)
-
-        # Export detailed breaks to CSV
-        if total_breaks > 0:
-            export_breaks_csv(target_date, engine)
-        
-        # Log Success
-        log_pipeline_run(engine, 'SUCCESS', start_time, target_date, breaks=total_breaks)
-        
-        print(f"\n✨ Reconciliation Complete for {target_date}. Check recon_trades table for details.")
-
-    except Exception as e:
-        print(f"\n❌ Reconciliation Failed: {e}")
-        try:
-            log_pipeline_run(engine, 'FAILED', start_time, target_date, error=str(e))
-        except:
-            pass
-        sys.exit(1)
-
-if __name__ == "__main__":
-    main()
-
 def print_top_breaks(date_str, engine):
     """Show the top 10 most critical breaks for immediate attention."""
     print("\n🚨 TOP 10 CRITICAL BREAKS")
@@ -188,3 +151,44 @@ def print_top_breaks(date_str, engine):
         for row in rows:
             trade_id, break_type, symbol, notional = row
             print(f"{trade_id:<15} | {break_type:<25} | {symbol:<8} | ${notional:>12,.2f}")
+
+def main():
+    parser = argparse.ArgumentParser(description="Run Trade Reconciliation for a specific date.")
+    parser.add_argument('--date', type=str, required=False, help="YYYY-MM-DD")
+    args = parser.parse_args()
+    
+    target_date = args.date if args.date else datetime.now().strftime('%Y-%m-%d')
+    start_time = datetime.now()
+    
+    try:
+        engine = create_engine(DB_CONNECTION_STR)
+        
+        # Run the Logic and get summary
+        summary_rows = run_recon(target_date, engine)
+        
+        # Show Results
+        total_breaks = print_summary(summary_rows)
+
+        # Export detailed breaks to CSV
+        # if total_breaks > 0:
+        #     export_breaks_csv(target_date, engine)
+        
+        # Log Success
+        log_pipeline_run(engine, 'SUCCESS', start_time, target_date, breaks=total_breaks)
+        
+        print(f"\n✨ Reconciliation Complete for {target_date}. Check recon_trades table for details.")
+
+        print_top_breaks(target_date, engine)
+
+    except Exception as e:
+        print(f"\n❌ Reconciliation Failed: {e}")
+        try:
+            log_pipeline_run(engine, 'FAILED', start_time, target_date, error=str(e))
+        except:
+            pass
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+
+
