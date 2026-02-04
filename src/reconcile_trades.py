@@ -3,7 +3,7 @@ from sqlalchemy import create_engine, text
 from datetime import datetime
 import os
 import sys
-# import pandas as pd
+import pandas as pd
 
 # --- CONFIGURATION ---
 DB_CONNECTION_STR = 'postgresql://jessica@localhost:5432/trade_ops_recon'
@@ -90,22 +90,33 @@ def print_summary(summary_rows):
     print(f"Total Breaks Found: {total_breaks}")
     return total_breaks
 
-# def export_breaks_csv(date_str, engine):
-#     """Export detailed breaks to CSV for investigation."""    
-#     with engine.connect() as conn:
-#         query = text("""
-#             SELECT recon_date, trade_id, symbol, account, break_type, severity, 
-#                    internal_value, broker_value, notional_impact, resolved
-#             FROM recon_trades
-#             WHERE recon_date = :date
-#             ORDER BY severity, notional_impact DESC
-#         """)
-#         df = pd.read_sql(query, conn, params={"date": date_str})
-    
-#     output_path = f"data/processed/recon_reports/breaks_{date_str}.csv"
-#     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-#     df.to_csv(output_path, index=False)
-#     print(f"📄 Detailed breaks exported to {output_path}")
+def export_breaks_csv(date_str, engine):
+    """Export detailed breaks to CSV for investigation."""
+    try:
+        query = text("""
+            SELECT recon_date, trade_id, symbol, account, break_type, severity, 
+                   internal_value, broker_value, notional_impact, resolved
+            FROM recon_trades
+            WHERE recon_date = :date
+            ORDER BY severity, notional_impact DESC
+        """)
+        # Use engine directly; pandas manages the connection lifecycle
+        df = pd.read_sql(query, engine, params={"date": date_str})
+    except Exception as e:
+        print(f"❌ Failed to export breaks CSV: {e}")
+        return
+
+    output_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "data",
+        "processed",
+        "recon_reports",
+        f"breaks_{date_str}.csv"
+    )
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    df.to_csv(output_path, index=False)
+    print(f"📄 Detailed breaks exported to {output_path}")
+
 
 
 def log_pipeline_run(engine, status, start_time, date_str, breaks=0, error=None):
@@ -170,8 +181,8 @@ def main():
         total_breaks = print_summary(summary_rows)
 
         # Export detailed breaks to CSV
-        # if total_breaks > 0:
-        #     export_breaks_csv(target_date, engine)
+        if total_breaks > 0:
+            export_breaks_csv(target_date, engine)
         
         # Log Success
         log_pipeline_run(engine, 'SUCCESS', start_time, target_date, breaks=total_breaks)

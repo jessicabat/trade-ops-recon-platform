@@ -1,0 +1,72 @@
+---
+---
+
+@import "{{ site.theme }}";
+
+/* 1. TYPOGRAPHY IMPORTS */
+@import url('https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,700;1,300&family=Inter:wght@400;600&family=JetBrains+Mono&display=swap');
+
+/* 2. BASE LAYOUT - The "Paper" Look */
+body {
+  background-color: #FAFAF9; /* Warm Off-White (Stone-50) */
+  color: #1F2937; /* Soft Charcoal, not pure black */
+  font-family: 'Inter', sans-serif;
+  line-height: 1.7;
+}
+
+.wrapper {
+  max-width: 720px; /* Narrow column for reading focus */
+  margin: 0 auto;
+  padding: 60px 20px;
+}
+
+/* 3. HEADERS - The "Academic" Touch */
+h1, h2, h3 {
+  font-family: 'Merriweather', serif;
+  color: #111827;
+  letter-spacing: -0.02em;
+}
+
+h1 { font-size: 2.2em; margin-bottom: 0.5em; border-bottom: none; }
+h2 { font-size: 1.5em; margin-top: 2em; border-bottom: 1px solid #E5E7EB; padding-bottom: 10px; }
+h3 { font-size: 1.1em; font-weight: 600; margin-top: 1.5em; color: #4B5563; }
+
+/* 4. CODE BLOCKS - The "Engineer" Evidence */
+pre, code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85em;
+}
+
+/* Make code blocks dark and rounded */
+div.highlighter-rouge .highlight {
+  background-color: #1E1E1E !important;
+  border-radius: 8px;
+  padding: 15px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+code { color: #E5E7EB; } 
+
+/* 5. CALLOUTS - For your "Learnings" */
+blockquote {
+  border-left: 4px solid #EA580C; /* Burnt Orange Accent */
+  background-color: #FFF7ED;
+  color: #431407;
+  padding: 15px 20px;
+  margin: 30px 0;
+  font-style: normal;
+  border-radius: 4px;
+  font-family: 'Merriweather', serif;
+  font-size: 0.95em;
+}
+
+/* 6. IMAGES - Shadowed and Clean */
+img {
+  border-radius: 8px;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  margin: 20px 0;
+  border: 1px solid #E5E7EB;
+}
+
+/* 7. LINKS */
+a { color: #EA580C; text-decoration: none; font-weight: 600; }
+a:hover { text-decoration: underline; }
