@@ -6,6 +6,7 @@ I built this project to understand the engineering and operational challenges of
 
 ![System Architecture Diagram](docs/assets/system_architecture.png)
 
+**This README focuses on how the system is built and how to run it. For a more visual overview, see the project site: [link].**
 ---
 
 ## Table of Contents
