@@ -1,153 +1,222 @@
-# Trade Operations Reconciliation Platform
+# Trading Operations Reconciliation Platform
 
-**Project Status:** Complete | **Stack:** Python, PostgreSQL, Bash, SQL
+This is an end-to-end simulation of a daily trading operations workflow. It functions as a T+0 reconciliation engine that ingests synthetic trade logs from an "internal" system and an external "broker", normalizes them in PostgreSQL, runs SQL-based logic to detect breaks, and calculates daily PnL.
+
+I built this project to understand the engineering and operational challenges of the Middle Office—specifically how financial firms ensure their internal books match external records to prevent financial loss and settlement failure.
+
+![System Architecture Diagram](docs/assets/system_architecture.png)
+
+---
+
+## Table of Contents
+1. [Project Overview](#project-overview)
+2. [Technical Features](#technical-features)
+3. [Database Schema](#database-schema)
+4. [Reconciliation Logic](#reconciliation-logic)
+5. [Example Outputs](#example-outputs)
+6. [Project Structure](#project-structure)
+7. [How to Run](#how-to-run)
+
+---
 
 ## Project Overview
 
-This project is an end-to-end simulation of a Middle Office trading operations platform. I built this to understand the lifecycle of a trade *after* execution—specifically how financial firms ensure their internal books match external records (brokers/custodians) to prevent financial loss and settlement failure.
+The system simulates a high-volume environment (50,000+ daily trades) where data discrepancies are inevitable. It focuses on **Operational Resilience**—ensuring that the system can detect errors and be safely re-run if data changes.
 
-The system generates 50,000+ daily synthetic trades, corrupts a subset of them to simulate real-world operational breaks (e.g., price mismatches, missing booking, settlement errors), and runs an automated ETL and reconciliation pipeline to detect, classify, and report these risks.
+### Core Objectives
+- **Data Modeling:** Designing a normalized schema for trades, positions, and cash.
+- **SQL-First Logic:** Implementing complex join logic (Anti-Joins) in the database layer rather than Python for auditability and performance.
+- **Idempotency:** Building a pipeline that cleans up partial states before running, allowing for safe re-processing of historical dates.
 
-## Motivation
+---
 
-As a Data Science student, I am comfortable with data analysis, but I wanted to understand the engineering and operational challenges of high-volume financial systems. I built this project to answer three questions:
+## Technical Features
 
-1. How do firms catch expensive errors (like a missing trade) before they impact the bottom line?
-2. How can SQL be used not just for querying, but for complex logic (Anti-Joins for break detection)?
-3. How do you build a data pipeline that is **idempotent** (can be safely re-run multiple times)?
+* **Synthetic Data Generation:** Python scripts generate realistic trade logs with attributes like Strategy, Venue, and Fee structures. It injects probabilistic errors (e.g., 1% price mismatches, 0.5% missing trades) to test the recon engine.
+* **High-Performance ETL:** Uses the PostgreSQL `COPY` protocol to bulk-load 50,000 rows in under 2 seconds, simulating low-latency requirements.
+* **3-Way Reconciliation:**
+    * **Trade Level:** Matches individual executions on Symbol, Quantity, Price, and Settlement Date.
+    * **Position Level:** Aggregates net positions per account/symbol to catch booking errors.
+    * **Cash Level:** Reconciles net cash balances per currency to ensure liquidity accuracy.
+* **Automated Reporting:** Generates an HTML Executive Summary and detailed CSV break files for analyst investigation.
 
-## Architecture
+### Tech Stack
+* **Database:** PostgreSQL 14+
+* **Language:** Python 3.10+ (Pandas, SQLAlchemy, Streamlit)
+* **Orchestration:** Bash scripting for End-of-Day (EOD) sequencing
 
-The system follows a standard extract-load-transform (ELT) pattern:
+---
 
-1. **Data Generation:** Python scripts create "Golden Source" internal logs and "Corrupted" broker logs.
-2. **Ingestion:** A high-performance loader pushes CSVs into PostgreSQL.
-3. **Processing:** SQL logic handles the heavy lifting for reconciliation and PnL calculation.
-4. **Reporting:** Python extracts results for dashboards and daily status reports.
+## Database Schema
 
-## Technical Highlights
+The database is normalized to separate the "Source of Truth" (Internal) from "External Data" (Broker). The `recon_trades` table acts as an exception log, linking back to the source tables via `trade_id`.
 
-### 1. Performance Optimization: Bulk Loading
+![Entity Relationship Diagram](docs/assets/database_schema.png)
 
-Initially, I used standard Pandas `to_sql` inserts, which were too slow for 50,000+ rows. I refactored the pipeline to use the PostgreSQL `COPY` protocol via an in-memory buffer. This reduced the daily load time from ~45 seconds to <2 seconds, simulating the need for low-latency data handling in trading environments.
+---
 
-### 2. Reconciliation Logic (SQL)
+## Reconciliation Logic
 
-I chose to implement the reconciliation logic in SQL rather than Python to ensure data integrity and auditability. The core logic uses **Anti-Joins** to find missing records and **Inner Joins** to compare field-level attributes.
+I implemented the core business logic in SQL to leverage the database engine for heavy lifting.
 
-**Example: Detecting "Missing in Broker" Breaks (Left Anti-Join)**
-This query finds trades booked internally that the broker has no record of—a critical risk.
+### 1. Trade Reconciliation
+The engine detects 6 distinct break types by joining `internal_trades` and `broker_trades`.
+
+* **Missing Trades (Execution Risk):** Uses Left/Right Anti-Joins to find trades present in one system but missing in the other.
+* **Economic Mismatches:** Inner Joins that flag discrepancies in Price, Quantity, or Fees.
+* **Settlement Mismatches:** specifically checks `settlement_date` to prevent liquidity breaks (e.g., Internal T+1 vs Broker T+2).
+
+**Example Logic (Missing Internal Trades):**
+```sql
+INSERT INTO recon_trades (recon_date, trade_id, break_type, severity, ...)
+SELECT
+    :recon_date,
+    b.trade_id,
+    'MISSING_IN_INTERNAL',
+    CASE WHEN ABS(b.quantity * b.price) > 100000 THEN 'CRITICAL' ELSE 'MEDIUM' END
+FROM broker_trades b
+LEFT JOIN internal_trades i ON b.trade_id = i.trade_id
+WHERE b.trade_date = :recon_date
+  AND i.trade_id IS NULL;
+
+```
+
+### 2. PnL Attribution
+
+The system calculates **Realized PnL** based on the verified internal trades. It attributes profit to specific strategies (e.g., Market Making vs. Delta Neutral).
 
 ```sql
 SELECT 
-    i.trade_id,
-    i.symbol,
-    'MISSING_IN_BROKER' as break_type,
-    ABS(i.quantity * i.price) as notional_impact
-FROM internal_trades i
-LEFT JOIN broker_trades b ON i.trade_id = b.trade_id
-WHERE i.trade_date = '2026-02-01' 
-  AND b.trade_id IS NULL; -- The "Anti-Join" filter
+    strategy,
+    SUM(CASE WHEN side = 'BUY' THEN -1 * (quantity * price)
+             ELSE (quantity * price) END) AS realized_pnl
+FROM internal_trades
+GROUP BY strategy;
 
 ```
 
-### 3. Risk Management: Dynamic Severity Classification
+---
 
-Not all breaks are equal. A $10 price break is noise; a $1M missing trade is a crisis. I implemented a UDF (User Defined Function) in Postgres to auto-classify breaks, allowing the operations team to prioritize "CRITICAL" issues first.
+## Example Outputs
 
-```sql
-CREATE OR REPLACE FUNCTION classify_severity(p_notional NUMERIC) RETURNS VARCHAR AS $$
-BEGIN
-    CASE
-        WHEN p_notional >= 100000 THEN RETURN 'CRITICAL';
-        WHEN p_notional >= 10000 THEN RETURN 'HIGH';
-        WHEN p_notional >= 1000 THEN RETURN 'MEDIUM';
-        ELSE RETURN 'LOW';
-    END CASE;
-END;
-$$ LANGUAGE plpgsql IMMUTABLE;
+Below are actual outputs from a simulation run of **50,000 trades** for date `2026-02-01`.
 
-```
+### 1. Trade Break Summary (CLI)
 
-## The Data Pipeline
-
-The entire system is orchestrated by a Bash script (`run_eod_pipeline.sh`) that simulates an End-of-Day (EOD) process. It enforces **idempotency**: before loading data for a specific date, it cleans up any partial data for that date to prevent duplicates.
-
-**Pipeline Steps:**
-
-1. **Load:** Ingest Internal Trades, Broker Trades, Positions, and Cash balances.
-2. **Reconcile Trades:** Detect execution errors (Price, Qty, Fees, Settlement Date).
-3. **Reconcile Books:** Compare aggregated Net Positions and Cash Balances.
-4. **Calculate PnL:** Compute realized Profit & Loss by Strategy and Account.
-5. **Report:** Generate HTML summaries and detailed CSV break lists.
-
-## Sample Output
-
-Below is the actual terminal output from a run processing 50,000 trades. The system successfully identified nearly $800M in "Critical" risk (simulated missing trades).
+The system detected 2,893 breaks. The "CRITICAL" breaks represent missing trades with a high notional value, requiring immediate attention.
 
 ```text
 BREAK TYPE                | SEVERITY   | COUNT    | TOTAL $         | AVG $
 ---------------------------------------------------------------------------
 MISSING_IN_BROKER         | CRITICAL   | 458      | $526,553,334.79 | $1,149,679.77
 MISSING_IN_INTERNAL       | CRITICAL   | 231      | $268,819,780.05 | $1,163,721.99
-QTY_MISMATCH              | MEDIUM     | 169      | $   511,357.45 | $    3,025.78
-FEE_MISMATCH              | LOW        | 959      | $       479.11 | $        0.50
----------------------------------------------------------------------------
-Total Breaks Found: 2893
+QTY_MISMATCH              | MEDIUM     | 169      | $  511,357.45 |$    3,025.78
+SETTLEMENT_MISMATCH       | MEDIUM     | 485      | $        0.00 |$       0.00
+FEE_MISMATCH              | LOW        | 959      | $      479.11 |$       0.50
 
 ```
 
-## Database Schema
+### 2. Position Reconciliation
 
-The database is normalized to separate "Source of Truth" (Internal) from "External Data" (Broker).
+After reconciling trades, the system aggregates positions to ensure the books are flat.
 
-* `internal_trades` / `broker_trades`: Raw trade logs.
-* `recon_trades`: The exception table. Only stores problems.
-* `pipeline_runs`: Metadata table to track SLA (start time, end time, success/fail status).
+```text
+POSITION RECONCILIATION REPORT
+===========================================================================
+BREAK TYPE                | SEVERITY   | COUNT    | TOTAL DIFF   | AVG DIFF
+---------------------------------------------------------------------------
+POSITION_MISMATCH         | CRITICAL   | 35       |      367,459 |  10,498.83
+POSITION_MISMATCH         | HIGH       | 5        |        2,515 |     503.00
 
-## How to Run Locally
+```
 
-**Prerequisites:** Python 3.10+, PostgreSQL.
+### 3. PnL Detail
 
-1. **Clone and Setup:**
+A snapshot of the daily performance by strategy.
+
+```text
+STRATEGY             | SYMBOLS  | TRADES   | NET PNL
+---------------------------------------------------------------------------
+DeltaNeutral         |       10 |    12465 | $ 31,227,063.86
+StatisticalArb       |       10 |    12568 | $-120,430,990.46
+LiquidityProv        |       10 |    12517 | $-149,715,692.42
+MarketMaking         |       10 |    12450 | $-162,748,424.43
+
+```
+
+---
+
+## Project Structure
+
+```text
+trade-ops-recon-platform/
+  sql/
+    schema.sql               # Database definition and indexing
+    recon_trades.sql         # Trade-level break logic (Anti-Joins)
+    recon_positions.sql      # Position aggregation logic
+    recon_cash.sql           # Cash balance logic
+    pnl_calculation.sql      # Realized PnL logic
+
+  src/
+    generate_data.py         # Synthetic data generation with error injection
+    load_to_db.py            # High-performance ETL (Postgres COPY)
+    reconcile_trades.py      # Reconciliation engine wrapper
+    calculate_pnl.py         # PnL engine wrapper
+    generate_reports.py      # Static HTML report generation
+    dashboard.py             # Interactive Streamlit visualization
+
+  scripts/
+    run_eod_pipeline.sh      # Main orchestration script
+
+```
+
+---
+
+## How to Run
+
+### 1. Prerequisites
+
+* PostgreSQL installed and running locally.
+* Python 3.10+.
+
+### 2. Setup
+
 ```bash
-git clone https://github.com/yourusername/trade-ops-recon-platform.git
+# Clone the repo
+git clone https://github.com/jessicabat/trade-ops-recon-platform.git
 cd trade-ops-recon-platform
+
+# Create virtual environment
 python -m venv .venv
 source .venv/bin/activate
+
+# Install dependencies
 pip install -r requirements.txt
 
-```
-
-
-2. **Initialize Database:**
-```bash
+# Initialize Database
 createdb trade_ops_recon
 psql -d trade_ops_recon -f sql/schema.sql
 
 ```
 
+### 3. Run the Simulation
 
-3. **Run the Simulation:**
-This command generates fresh data for the date and runs the full pipeline.
+To generate fresh data for a specific date and run the end-to-end pipeline:
+
 ```bash
-# Generate data and run pipeline for a specific date
+# 1. Generate synthetic data
 python src/generate_data.py
+
+# 2. Run the EOD Pipeline (Load -> Recon -> PnL -> Report)
 ./scripts/run_eod_pipeline.sh 2026-02-01
 
 ```
 
+### 4. Visualizing Results
 
-4. **View Dashboard:**
+You can view the results via the generated HTML report in `data/processed/eod_reports/` or launch the interactive dashboard:
+
 ```bash
 streamlit run src/dashboard.py
 
 ```
-
-
-
-## Key Learnings
-
-* **Settlement Date Risk:** I learned that a trade matching on Price/Qty is not enough; if the Internal system expects settlement T+1 and the Broker expects T+2, the firm will have a cash liquidity issue. My system now checks specifically for `SETTLEMENT_MISMATCH`.
-* **The "Books and Records" Concept:** I initially thought PnL was just `Price * Qty`. I realized that for Operations, PnL must be reconciled against the *actual* cash movement at the broker, accounting for fees, to be accurate.
-* **Operational Resilience:** Writing the pipeline to be re-runnable (handling failures gracefully) was just as important as the reconciliation logic itself.
