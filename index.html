@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trade Ops Reconciliation Platform</title>
+    <link rel="stylesheet" href="docs/assets/css/style.css">
+</head>
+<body>
+
+    <div class="container">
+        
+        <header>
+        <p style="text-transform: uppercase; letter-spacing: 1px; font-size: 0.85em; color: #6B7280; margin-bottom: 10px;">
+            Engineering Project • 2 Week Sprint
+        </p>
+        <h1>Building a T+0 Trade Reconciliation Engine</h1>
+        <p class="lead">
+            Hi, I'm Jessica, a college senior studying Data Science.
+        </p>
+        <p>
+            This project simulates a daily Middle Office workflow: generating 50,000 synthetic trades, intentionally breaking them, and writing the SQL and Python to catch those breaks before they roll up into positions, cash, and PnL.
+        </p>
+        <p>
+            <a href="YOUR_GITHUB_LINK_HERE">View the Source Code on GitHub &rarr;</a>
+        </p>
+        </header>
+
+
+        <section>
+        <h2>The Architecture</h2>
+        <p>
+            Each “day” in this simulation runs the same pipeline: data generation in Python, storage in Postgres, reconciliation logic in SQL, and reporting for an operations-style user.
+        </p>
+        <p>
+            At a high level, the system answers three questions:
+            <strong>Did we book the trade?</strong>,
+            <strong>Do our positions match?</strong>,
+            <strong>What is our PnL?</strong>
+        </p>
+
+        <img src="docs/assets/system_architecture.png" alt="System Architecture Diagram" class="diagram">
+
+        <div class="callout">
+            <strong>💡 Design choice: Idempotency</strong><br>
+            The loader deletes existing rows for a date before reloading, so if something fails, I can safely re-run the same date and end up with a clean, consistent state.
+        </div>
+        </section>
+
+
+        <section>
+            <h2>1. Making the Mess (Data Generation)</h2>
+            <p>
+                Real data isn't clean. To make this simulation realistic, I generate “internal” trade logs first, then build a corrupted “broker” copy on top of them.
+            </p>
+            <p>
+                I inject specific differences that show up in real reconciliations: phantom trades, missing trades, small price deviations, and settlement date drifts. The goal is to stress-test the downstream logic, not to have perfect data.
+            </p>
+
+            <div class="data-diff">
+                <div class="file-box">
+                    <div class="file-title">INTERNAL_TRADES.CSV</div>
+                    <div class="data-row">TRD_001 | AAPL | 100 @ 150.00</div>
+                    <div class="data-row">TRD_002 | TSLA | 50 @ 200.00</div>
+                    <div class="data-row">TRD_003 | GOOG | 10 @ 2800.00</div>
+                </div>
+                <div class="file-box">
+                    <div class="file-title">BROKER_TRADES.CSV</div>
+                    <div class="data-row">TRD_001 | AAPL | 100 @ 150.00</div>
+                    <div class="data-row highlight">TRD_002 | TSLA | 50 @ 199.95 ⚠️</div>
+                    <div class="data-row highlight">[MISSING RECORD] ⚠️</div>
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <h2>2. Where Internal and Broker Disagree (SQL)</h2>
+            <p>
+                Once both views are in Postgres, the key question is: where do they disagree? For example, a trade might exist at the broker but be missing internally, or the two sides might disagree on price, quantity, or fees.
+            </p>
+            <p>
+                The core pattern is a <strong>LEFT JOIN + IS NULL</strong>, which lets me find trades that exist in one table but not the other. Here is the snippet that flags trades the broker has but the internal system is missing:
+            </p>
+
+            <div class="code-window">
+                <div class="window-header">
+                    <div class="dot red"></div>
+                    <div class="dot yellow"></div>
+                    <div class="dot green"></div>
+                </div>
+                <pre><code><span class="sql-comment">/* Finds trades the broker has, but we don't */</span>
+                <span class="sql-keyword">INSERT INTO</span> recon_trades (break_type, severity, ...)
+                <span class="sql-keyword">SELECT</span> 
+                    <span class="sql-string">'MISSING_IN_INTERNAL'</span>,
+                    <span class="sql-string">'CRITICAL'</span>,
+                    ...
+                <span class="sql-keyword">FROM</span> broker_trades b
+                <span class="sql-keyword">LEFT JOIN</span> internal_trades i <span class="sql-keyword">ON</span> b.trade_id = i.trade_id
+                <span class="sql-keyword">WHERE</span> b.trade_date = :recon_date 
+                <span class="sql-keyword">AND</span> i.trade_id <span class="sql-keyword">IS NULL</span>; <span class="sql-comment">-- The Anti-Join</span></code></pre>
+            </div>
+        </section>
+
+        <section>
+            <section>
+            <h2>3. The Verdict (Outputs)</h2>
+            <p>
+                After processing 50,000 trades, the pipeline generates a summary that an operations analyst could use to triage breaks.
+            </p>
+
+            <h3>Trade-Level Breaks</h3>
+            <p>
+                In this run, the system flagged <strong>2,893 discrepancies</strong>. Most of the dollar impact comes from missing trades; smaller issues like fee mismatches show up in the long tail.
+            </p>
+            <div class="terminal">BREAK TYPE                | SEVERITY   | COUNT    | TOTAL $ IMPACT
+------------------------------------------------------------------
+MISSING_IN_BROKER         | CRITICAL   | 458      | $526,553,334
+MISSING_IN_INTERNAL       | CRITICAL   | 231      | $268,819,780
+QTY_MISMATCH              | MEDIUM     | 169      | $    511,357
+FEE_MISMATCH              | LOW        | 959      | $        479</div>
+
+            <h3>PnL Attribution</h3>
+            <p>Finally, the system calculates the Realized PnL for the day using the verified internal trades, grouping by strategy.</p>
+
+            <div class="terminal">STRATEGY             | TRADES   | NET PNL
+------------------------------------------------------
+DeltaNeutral         | 12,465   | $ 31,227,063.86
+StatisticalArb       | 12,568   | $-120,430,990.46
+LiquidityProv        | 12,517   | $-149,715,692.42
+MarketMaking         | 12,450   | $-162,748,424.43</div>
+        <p>
+            The PnL view is grouped by strategy. The numbers here are synthetic, but the structure matches how desks think about PnL attribution.
+        </p>
+        </section>
+
+        <section style="margin-top: 100px; border-top: 1px solid #E5E7EB; padding-top: 40px;">
+        <h2>How It Runs Day-to-Day</h2>
+        <p>
+            In practice, everything is wrapped in a single shell script that runs the full end-of-day pipeline for a given date: load, reconcile, PnL, and reporting.
+        </p>
+        <div class="code-window">
+                <div class="window-header">
+                    <div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div>
+                </div>
+                <pre><code><span class="sql-comment"># From the project root</span>
+./scripts/run_eod_pipeline.sh 2026-02-01</code></pre>
+            </div>
+        <p>
+            <a href="YOUR_GITHUB_LINK_HERE">See the full implementation and README on GitHub &rarr;</a>
+        </p>
+        </section>
+
+
+    </div>
+
+</body>
+</html>
