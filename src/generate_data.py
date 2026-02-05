@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
+import argparse
 from datetime import datetime, timedelta
 
 # --- Configuration ---
@@ -10,7 +11,7 @@ ACCOUNTS = ['ACCT_MAIN', 'ACCT_HEDGE', 'ACCT_ARB', 'ACCT_FLOW']
 STRATEGIES = ['MarketMaking', 'StatisticalArb', 'LiquidityProv', 'DeltaNeutral']
 VENUES = ['NASDAQ', 'NYSE', 'ARCA', 'BATS', 'IEX']
 
-# Get the absolute path of the project root to avoid "No such file" errors
+# Get the absolute path of the project root
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, 'data', 'raw')
 
@@ -29,14 +30,18 @@ def setup_directories():
         os.makedirs(path, exist_ok=True)
     print("✓ Directories verified.")
 
-def generate_internal_trades(n=1000):
-    print(f"Generating {n} internal trades...")
+def generate_internal_trades(n=1000, target_date=None):
+    if target_date is None:
+        target_date = datetime.now().date()
+        
+    print(f"Generating {n} internal trades for {target_date}...")
     
-    # Generate data using native Python types where possible to avoid Pandas warnings
     trade_ids = [f"TRD_{i:07d}" for i in range(1, n + 1)]
-    dates = [datetime.now().date()] * n
     
-    # Settlement logic: random 1 or 2 days
+    # UPDATED: Use target_date instead of datetime.now()
+    dates = [target_date] * n
+    
+    # Settlement logic: random 1 or 2 days from the target date
     settle_deltas = np.random.choice([1, 2], n)
     settle_dates = [d + timedelta(days=int(delta)) for d, delta in zip(dates, settle_deltas)]
     
@@ -81,14 +86,11 @@ def corrupt_broker_data(internal_df):
     broker_df.loc[mask_fee, 'fees'] += np.random.uniform(-1.00, 1.00, sum(mask_fee))
     broker_df['fees'] = broker_df['fees'].round(2)
 
-    # 4. Settlement Date Mismatches (1%) - Fixed the Warning here
+    # 4. Settlement Date Mismatches (1%)
     mask_settle = np.random.choice([True, False], size=len(broker_df), p=[0.01, 0.99])
-    # Convert column to datetime first to be safe
     broker_df['settlement_date'] = pd.to_datetime(broker_df['settlement_date'])
-    # Add random timedelta
     random_days = np.random.choice([-1, 1], sum(mask_settle))
     broker_df.loc[mask_settle, 'settlement_date'] += pd.to_timedelta(random_days, unit='D')
-    # Convert back to date object for clean CSV
     broker_df['settlement_date'] = broker_df['settlement_date'].dt.date
 
     # 5. Missing Trades (1%)
@@ -97,7 +99,9 @@ def corrupt_broker_data(internal_df):
     
     # 6. Phantom Trades (0.5%)
     n_phantom = int(len(internal_df) * 0.005)
-    phantom_df = generate_internal_trades(n_phantom)
+    # Important: Pass the same trade date to phantom trades
+    target_date = internal_df['trade_date'].iloc[0]
+    phantom_df = generate_internal_trades(n_phantom, target_date)
     phantom_df['trade_id'] = [f"BRK_ONLY_{i}" for i in range(n_phantom)]
     broker_df = pd.concat([broker_df, phantom_df])
     
@@ -107,39 +111,51 @@ def corrupt_broker_data(internal_df):
                                 else ((x['quantity'] * x['price']) - x['fees']), axis=1)
     return broker_df
 
-def aggregate_positions(df):
-    # Work on a copy to avoid modifying the original trades dataframe
+def aggregate_positions(df, target_date):
     df_copy = df.copy()
     df_copy['signed_qty'] = df_copy.apply(lambda x: x['quantity'] if x['side'] == 'BUY' else -x['quantity'], axis=1)
     pos_df = df_copy.groupby(['account', 'symbol'])['signed_qty'].sum().reset_index()
     pos_df.rename(columns={'signed_qty': 'net_position'}, inplace=True)
-    pos_df['position_date'] = datetime.now().date()
+    # UPDATED: Use target_date
+    pos_df['position_date'] = target_date
     return pos_df
 
-
-
-def aggregate_cash(df):
+def aggregate_cash(df, target_date):
     cash_df = df.groupby(['account', 'currency'])['principal'].sum().reset_index()
     cash_df.rename(columns={'principal': 'net_cash_balance'}, inplace=True)
-    cash_df['cash_date'] = datetime.now().date()
+    # UPDATED: Use target_date
+    cash_df['cash_date'] = target_date
     return cash_df
 
-
 def main():
+    # UPDATED: Add Argument Parser
+    parser = argparse.ArgumentParser(description="Generate Trade Ops Data.")
+    parser.add_argument('--date', type=str, required=False, help="YYYY-MM-DD format")
+    args = parser.parse_args()
+
+    # Determine date (Argument -> Today)
+    if args.date:
+        target_date = datetime.strptime(args.date, '%Y-%m-%d').date()
+    else:
+        target_date = datetime.now().date()
+
     setup_directories()
     
-    internal_df = generate_internal_trades(NUM_TRADES)
+    # Pass target_date to generator
+    internal_df = generate_internal_trades(NUM_TRADES, target_date)
     broker_df = corrupt_broker_data(internal_df)
     
-    internal_pos = aggregate_positions(internal_df)
-    broker_pos = aggregate_positions(broker_df)
+    # Pass target_date to aggregators
+    internal_pos = aggregate_positions(internal_df, target_date)
+    broker_pos = aggregate_positions(broker_df, target_date)
     
-    internal_cash = aggregate_cash(internal_df)
-    broker_cash = aggregate_cash(broker_df)
+    internal_cash = aggregate_cash(internal_df, target_date)
+    broker_cash = aggregate_cash(broker_df, target_date)
     
-    date_str = datetime.now().strftime('%Y-%m-%d')
+    # Use target_date for filename
+    date_str = target_date.strftime('%Y-%m-%d')
     
-    print("💾 Saving to CSV...")
+    print(f"💾 Saving to CSV for date {date_str}...")
     internal_df.to_csv(f"{PATHS['internal_trades']}/internal_trades_{date_str}.csv", index=False)
     broker_df.to_csv(f"{PATHS['broker_trades']}/broker_trades_{date_str}.csv", index=False)
     
