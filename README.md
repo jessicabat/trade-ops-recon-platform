@@ -6,7 +6,7 @@ I built this project to understand the engineering and operational challenges of
 
 ![System Architecture Diagram](docs/assets/system_architecture.png)
 
-**This README focuses on how the system is built and how to run it. For a more visual overview, see the project site: [link].**
+**This README focuses on how the system is built and how to run it. For a more visual overview, see the project site: [[link](https://jessicabat.github.io/trade-ops-recon-platform/)].**
 ---
 
 ## Table of Contents
@@ -205,10 +205,7 @@ psql -d trade_ops_recon -f sql/schema.sql
 To generate fresh data for a specific date and run the end-to-end pipeline:
 
 ```bash
-# 1. Generate synthetic data
-python src/generate_data.py
-
-# 2. Run the EOD Pipeline (Load -> Recon -> PnL -> Report)
+# Run the EOD Pipeline (Generate data -> Load -> Recon -> PnL -> Report)
 ./scripts/run_eod_pipeline.sh 2026-02-01
 
 ```

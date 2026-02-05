@@ -7,6 +7,16 @@
     <link rel="stylesheet" href="docs/assets/css/style.css">
 </head>
 <body>
+    <nav class="top-nav">
+        <div class="nav-left">
+            Trade Operations Reconciliation
+        </div>
+        <div class="nav-right">
+            <a class="nav-button" href="https://github.com/jessicabat/trade-ops-recon-platform" target="_blank" rel="noopener noreferrer">
+                View Project Repo →
+            </a>
+        </div>
+    </nav>
 
     <div class="container">
         
@@ -16,13 +26,15 @@
         </p>
         <h1>Building a T+0 Trade Reconciliation Engine</h1>
         <p class="lead">
-            Hi, I'm Jessica, a college senior studying Data Science.
+            Hi, I'm Jessica, a college senior studying Data Science focusing on data pipelines and trading operations.
         </p>
         <p>
             This project simulates a daily Middle Office workflow: generating 50,000 synthetic trades, intentionally breaking them, and writing the SQL and Python to catch those breaks before they roll up into positions, cash, and PnL.
         </p>
         <p>
-            <a href="YOUR_GITHUB_LINK_HERE">View the Source Code on GitHub &rarr;</a>
+            <a class="primary-cta" href="https://github.com/jessicabat/trade-ops-recon-platform" target="_blank" rel="noopener noreferrer">
+                View the Source Code on GitHub →
+            </a>
         </p>
         </header>
 
@@ -39,7 +51,11 @@
             <strong>What is our PnL?</strong>
         </p>
 
-        <img src="docs/assets/system_architecture.png" alt="System Architecture Diagram" class="diagram">
+        <img src="docs/assets/system_architecture.png"
+            alt="System Architecture Diagram"
+            class="diagram zoomable">
+
+
 
         <div class="callout">
             <strong>💡 Design choice: Idempotency</strong><br>
@@ -71,6 +87,7 @@
                     <div class="data-row highlight">[MISSING RECORD] ⚠️</div>
                 </div>
             </div>
+            <p>This is the kind of subtle drift that makes reconciliations necessary in the first place.</p>
         </section>
 
         <section>
@@ -98,29 +115,30 @@
                 <span class="sql-keyword">LEFT JOIN</span> internal_trades i <span class="sql-keyword">ON</span> b.trade_id = i.trade_id
                 <span class="sql-keyword">WHERE</span> b.trade_date = :recon_date 
                 <span class="sql-keyword">AND</span> i.trade_id <span class="sql-keyword">IS NULL</span>; <span class="sql-comment">-- The Anti-Join</span></code></pre>
+
             </div>
         </section>
 
         <section>
-            <section>
             <h2>3. The Verdict (Outputs)</h2>
             <p>
-                After processing 50,000 trades, the pipeline generates a summary that an operations analyst could use to triage breaks.
-            </p>
+                After processing 50,000 trades, the pipeline produces summaries that an operations analyst could use to triage breaks and sanity-check PnL for the day.            </p>
 
             <h3>Trade-Level Breaks</h3>
             <p>
-                In this run, the system flagged <strong>2,893 discrepancies</strong>. Most of the dollar impact comes from missing trades; smaller issues like fee mismatches show up in the long tail.
-            </p>
+                In this run, the system flagged <strong>2,893 discrepancies</strong>. Most of the dollar impact comes from missing trades (the large notional rows), while issues like fee mismatches show up as a long tail of small but frequent differences.            </p>
             <div class="terminal">BREAK TYPE                | SEVERITY   | COUNT    | TOTAL $ IMPACT
 ------------------------------------------------------------------
 MISSING_IN_BROKER         | CRITICAL   | 458      | $526,553,334
 MISSING_IN_INTERNAL       | CRITICAL   | 231      | $268,819,780
 QTY_MISMATCH              | MEDIUM     | 169      | $    511,357
 FEE_MISMATCH              | LOW        | 959      | $        479</div>
+            <div class="terminal-label">
+                Trade break summary for a single day (subset of full report)
+            </div>
 
             <h3>PnL Attribution</h3>
-            <p>Finally, the system calculates the Realized PnL for the day using the verified internal trades, grouping by strategy.</p>
+            <p>The PnL view is grouped by strategy. The numbers here are synthetic, but the structure matches how desks think about PnL attribution by strategy and trade count.</p>
 
             <div class="terminal">STRATEGY             | TRADES   | NET PNL
 ------------------------------------------------------
@@ -128,8 +146,23 @@ DeltaNeutral         | 12,465   | $ 31,227,063.86
 StatisticalArb       | 12,568   | $-120,430,990.46
 LiquidityProv        | 12,517   | $-149,715,692.42
 MarketMaking         | 12,450   | $-162,748,424.43</div>
+        <div class="terminal-label">
+            PnL by strategy for the same day
+        </div>
+
+            
+        <img src="docs/assets/html_report.png"
+            alt="HTML EOD report"
+            class="diagram zoomable">
         <p>
-            The PnL view is grouped by strategy. The numbers here are synthetic, but the structure matches how desks think about PnL attribution.
+            This is the HTML summary I generate at the end of each run. It brings together trade breaks, positions, cash, and PnL in one place for review.
+        </p>
+
+        <video controls class="video-frame">
+            <source src="docs/assets/dashboard_streamlit.mp4" type="video/mp4">
+        </video>
+        <p class="image-caption">
+                Screen recording of the Streamlit dashboard: breaks by type and PnL by strategy, built directly on top of the same Postgres tables.
         </p>
         </section>
 
@@ -146,12 +179,86 @@ MarketMaking         | 12,450   | $-162,748,424.43</div>
 ./scripts/run_eod_pipeline.sh 2026-02-01</code></pre>
             </div>
         <p>
-            <a href="YOUR_GITHUB_LINK_HERE">See the full implementation and README on GitHub &rarr;</a>
+            <a class="primary-cta" href="https://github.com/jessicabat/trade-ops-recon-platform" target="_blank" rel="noopener noreferrer">
+                See the full implementation and README on GitHub →
+            </a>
         </p>
+
         </section>
 
+        <section style="margin-top: 60px; border-top: 1px solid #E5E7EB; padding-top: 32px;">
+            <h2>What I’d Do Next</h2>
+            <p>
+                This project was a two-week sprint focused on getting a realistic daily reconciliation flow working end-to-end. If I had more time, I’d extend it in a few directions:
+            </p>
+            <ul class="next-list">
+                <li>Add a simple break resolution workflow (mark breaks as resolved, add notes, and track who fixed them).</li>
+                <li>Wire in basic alerting for critical breaks (for example, posting a summary to Slack when a run finishes).</li>
+                <li>Move the database and scheduler to the cloud, and expose a small API for other tools to pull break and PnL data.</li>
+            </ul>
+
+            <h3>What I Learned</h3>
+            <ul class="next-list">
+                <li>How trade-level discrepancies roll up into positions, cash, and PnL, and why each layer matters.</li>
+                <li>Why keeping reconciliation logic in SQL makes it easier to review and reason about with non-Python users.</li>
+                <li>The importance of idempotent daily pipelines—you should be able to safely re-run “today” without worrying about data pollution.</li>
+            </ul>
+        </section>
+
+        <footer class="site-footer">
+        <div class="footer-inner">
+            <span>Built by Jessica — Trade Ops Reconciliation Project</span>
+            <div class="footer-links">
+                <a href="mailto:jessica.ybat@gmail.com">Email</a>
+                <a href="https://www.linkedin.com/in/jessica-batbayar" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                <a href="https://github.com/jessicabat" target="_blank" rel="noopener noreferrer">GitHub</a>
+            </div>
+        </div>
+    </footer>
 
     </div>
+        <div id="lightbox" class="lightbox-hidden">
+        <div class="lightbox-backdrop"></div>
+        <div class="lightbox-content">
+            <img id="lightbox-image" src="" alt="">
+            <button id="lightbox-close" aria-label="Close image">&times;</button>
+        </div>
+    </div>
+
+    <script>
+    // Simple image lightbox
+    document.addEventListener('DOMContentLoaded', function () {
+        const lightbox = document.getElementById('lightbox');
+        const lightboxImg = document.getElementById('lightbox-image');
+        const closeBtn = document.getElementById('lightbox-close');
+        const backdrop = document.querySelector('.lightbox-backdrop');
+
+        document.querySelectorAll('img.zoomable').forEach(img => {
+        img.addEventListener('click', () => {
+            lightboxImg.src = img.src;
+            lightboxImg.alt = img.alt;
+            lightbox.classList.remove('lightbox-hidden');
+            lightbox.classList.add('lightbox-visible');
+        });
+        });
+
+        function closeLightbox() {
+        lightbox.classList.remove('lightbox-visible');
+        lightbox.classList.add('lightbox-hidden');
+        lightboxImg.src = '';
+        }
+
+        closeBtn.addEventListener('click', closeLightbox);
+        backdrop.addEventListener('click', closeLightbox);
+
+        document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeLightbox();
+        }
+        });
+    });
+    </script>
+
 
 </body>
 </html>

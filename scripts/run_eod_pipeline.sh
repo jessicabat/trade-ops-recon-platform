@@ -24,6 +24,9 @@ echo "🚀 STARTING EOD PIPELINE FOR $TARGET_DATE"
 echo "============================================================================"
 echo ""
 
+echo "📦 Generating synthetic data for ${TARGET_DATE}..."
+python src/generate_data.py --date "${TARGET_DATE}"
+
 # --- STEP 1: DATA LOAD ---
 echo "📦 STEP 1/5: Loading Data..."
 python src/load_to_db.py --date "$TARGET_DATE"
@@ -77,3 +80,7 @@ echo ""
 echo "📁 Reports saved to: data/processed/eod_reports/"
 echo "🗄️  Database updated with reconciliation and PnL data"
 echo ""
+
+echo "Visit interactive dashboard (opens in browser):"
+echo "  streamlit run src/dashboard.py"
+streamlit run src/dashboard.py
